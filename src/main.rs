@@ -1,7 +1,6 @@
 #![allow(dead_code)]
 mod cpu;
 use crate::cpu::*;
-use itertools::Itertools;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -18,11 +17,6 @@ impl fmt::Display for Error {
     }
 }
 
-struct Cartridge {
-    pub rom: [u8; 3584],
-    pub size: usize,
-}
-
 static mut CPU: Cpu = Cpu {
     pc: 0x200,
     i: 0,
@@ -37,25 +31,16 @@ static mut CPU: Cpu = Cpu {
 
 fn main() -> io::Result<()> {
     let mut file = fs::File::open("15_Puzzle_[Roger Ivie].ch8")?;
-    let mut memory: [u8; 3584] = [0; 3584];
-    let bytes_read = file.read(&mut memory)?;
+    let mut memory: [u8; 4096] = [0; 4096];
+    let _bytes_read = file.read(&mut memory)?;
 
-    for chunk in &memory.iter().chunks(2) {
-        let mut opcode = 0;
-        let mut b1: u16 = 0;
-        let mut b2: u16 = 0;
-        for (i, b) in chunk.enumerate() {
-            if i == 1 {
-                b1 = *b as u16
-            } else {
-                b2 = *b as u16
-            }
+    for chunk in memory.chunks_exact(2) {
+        if let &[b1, b2] = chunk {
+            let opcode: u16 = (b1 as u16) << 8 | (b2 as u16);
+            decode_opcode(opcode).unwrap()
         }
-        opcode = b1 << 8 | b2;
-        decode_opcode(opcode).unwrap()
-    }
 
-    //println!("{:4X?}", memory);
+    }
 
     Ok(())
 }
