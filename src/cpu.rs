@@ -1,7 +1,9 @@
+use std::fmt;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
-use std::fmt;
+const SCREEN_WIDTH: usize = 64;
+const SCREEN_HEIGHT: usize = 32;
 
 pub enum Error {
     InvalidOpCode(),
@@ -42,7 +44,7 @@ impl Cpu {
         // for (i, byte) in buffer.iter().enumerate().take(bytes_read).skip(self.pc as usize) {
         //     self.memory[i] = *byte;
         // }
-        
+
         self.memory[self.pc as usize..].copy_from_slice(&buffer[self.pc as usize..bytes_read]);
 
         Ok(bytes_read)
@@ -55,172 +57,181 @@ impl Cpu {
         b1 << 8 | b2
     }
 
-    // TODO implement OPCODEs 
+    // TODO implement OPCODEs
     fn execute_opcode(&mut self) -> Result<(), Error> {
         let opcode = self.get_opcode();
 
-        match opcode & 0xF000 { // match against nibbles &'d with 0xF
+        match opcode & 0xF000 {
+            // match against nibbles &'d with 0xF
             0x0000 => match opcode & 0x00FF {
-                0x00E0 => { // CLS - Clear display
-                    print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
+                0x00E0 => {
+                    // CLS - Clear display
+                    self.display.clear();
                 }
-                0x00EE => { // RET
+                0x00EE => {
+                    // RET
+                    self.pc = self.stack[self.sp as usize];
+                    self.sp -= 1;
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                _ => { // 0nnn - SYS addr
+                _ => {
+                    // 0nnn - SYS addr, no longer used
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
             },
-            0x1000 => { // 1nnn - JP addr
-                print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
+            0x1000 => {
+                // 1nnn - JP addr
+                let nnn = opcode & 0x0FFF;
+                self.pc = nnn;
             }
-            0x2000 => { // 2nnn - CALL addr
-                print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
+            0x2000 => {
+                // 2nnn - CALL addr
+                self.sp += 1;
+                self.stack[self.sp as usize] = self.pc;
+                self.pc = opcode & 0x0FFF;
             }
-            0x3000 => { // 3xkk - SE Vx, byte
-                print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
+            0x3000 => {
+                // 3xkk - SE Vx, byte
+                if self.v[(opcode & 0x0F00) as usize] as u16 == opcode & 0x00FF {
+                    self.pc += 2;
+                }
             }
-            0x4000 => { // 4xkk - SNE Vx, byte
-                print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
+            0x4000 => {
+                // 4xkk - SNE Vx, byte
+                if self.v[(opcode & 0x0F00) as usize] as u16 != opcode & 0x00FF {
+                    self.pc += 2;
+                }
             }
-            0x5000 => { // 5xy0 - SE Vx, Vy 
-                print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
+            0x5000 => {
+                // 5xy0 - SE Vx, Vy
+                if self.v[(opcode & 0x0F00) as usize] == self.v[(opcode & 0x00F0) as usize] {
+                    self.pc += 2;
+                }
             }
-            0x6000 => { // 6xkk - LD Vx, byte
+            0x6000 => {
+                // 6xkk - LD Vx, byte
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0x7000 => { // 7xkk - ADD Vx, byte
+            0x7000 => {
+                // 7xkk - ADD Vx, byte
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0x8000 => match opcode & 0x000F { // bitwise operations
+            0x8000 => match opcode & 0x000F {
+                // bitwise operations
                 0x0000 => { // 8xy0 - LD Vx, Vy
-                    Ok(())
+                    self.v[(opcode & 0x0F00) as usize] = self.v[(opcode & 0x00F0) as usize];
                 }
-                0x0001 => { // OR Vx, Vy
+                0x0001 => {
+                    // OR Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0002 => { // AND Vx, Vy
+                0x0002 => {
+                    // AND Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0003 => { // XOR Vx, Vy
+                0x0003 => {
+                    // XOR Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0004 => { // ADD Vx, Vy
+                0x0004 => {
+                    // ADD Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0005 => { // SUB Vx, Vy
+                0x0005 => {
+                    // SUB Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0006 => { // SHR Vx {, Vy}
+                0x0006 => {
+                    // SHR Vx {, Vy}
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x0007 => { // SUBN Vx, Vy
+                0x0007 => {
+                    // SUBN Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                0x000E => { // SHL Vx, Vy
+                0x000E => {
+                    // SHL Vx, Vy
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                _ => Ok(()),
+                _ => (),
             },
-            0x9000 => { // 9xy0 - SNE Vx, Vy
+            0x9000 => {
+                // 9xy0 - SNE Vx, Vy
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0xA000 => { // Annn - LD I, addr
+            0xA000 => {
+                // Annn - LD I, addr
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0xB000 => { // Bnnn - JP V0, addr
+            0xB000 => {
+                // Bnnn - JP V0, addr
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0xC000 => { // Cxkk - RND Vx, byte
+            0xC000 => {
+                // Cxkk - RND Vx, byte
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
-            0xD000 => { // Dxyn - DRW Vx, Vy, nibble 
+            0xD000 => {
+                // Dxyn - DRW Vx, Vy, nibble
                 print!("Opcode: [{:>04X}] ", opcode);
-                Ok(())
             }
             0xE000 => match opcode & 0x00FF {
                 0x009E => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x00A1 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                _ => Ok(()),
+                _ => (),
             },
             0xF000 => match opcode & 0x00FF {
                 0x0007 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x000A => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0015 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0018 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x001E => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0029 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0033 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0055 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
                 0x0065 => {
                     print!("Opcode: [{:>04X}] ", opcode);
-                    Ok(())
                 }
-                _ => Ok(()),
+                _ => (),
             },
             _ => {
                 print!("Invalid Opcode: [{:04X}] ", opcode);
-                Ok(())
+
                 //Err(Error::InvalidOpCode())
             }
         }
+        self.pc += 2;
+        Ok(())
     }
 }
 
 pub struct Display {
-    pub vram: [u8; 32 * 64],
+    pub vram: [bool; SCREEN_HEIGHT * SCREEN_WIDTH],
 }
 
+impl Display {
+    pub fn clear(&mut self) {
+        self.vram = [false; SCREEN_HEIGHT * SCREEN_WIDTH];
+    }
+}
 pub struct Keypad {}
