@@ -2,3 +2,5 @@
 **/*.rs.bk
 *.ch8
 *.c8
+*.bmp
+*.lock
