@@ -7,6 +7,7 @@ const SCREEN_HEIGHT: usize = 32;
 
 pub enum Error {
     InvalidOpCode(),
+    InvalidValue(String),
 }
 
 impl fmt::Display for Error {
@@ -41,18 +42,17 @@ impl Cpu {
         let mut buffer: [u8; 3584] = [0; 3584];
         let bytes_read = file.read(&mut buffer)?;
 
-        // for (i, byte) in buffer.iter().enumerate().take(bytes_read).skip(self.pc as usize) {
-        //     self.memory[i] = *byte;
-        // }
-
-        self.memory[self.pc as usize..].copy_from_slice(&buffer[self.pc as usize..bytes_read]);
-
+        //self.memory[self.pc as usize..].copy_from_slice(&buffer[self.pc as usize..bytes_read]);
+        for (i, byte) in buffer.iter().enumerate().take(bytes_read).skip(self.pc as usize) {
+             self.memory[i] = *byte;
+        }
+        
         Ok(bytes_read)
     }
 
     fn get_opcode(&mut self) -> u16 {
-        let b1: u16 = self.memory[self.pc as usize] as u16;
-        let b2: u16 = self.memory[self.pc as usize + 1] as u16;
+        let b1: u16 = u16::from(self.memory[self.pc as usize]);
+        let b2: u16 = u16::from(self.memory[self.pc as usize + 1]);
 
         b1 << 8 | b2
     }
@@ -72,54 +72,50 @@ impl Cpu {
                     // RET
                     self.pc = self.stack[self.sp as usize];
                     self.sp -= 1;
-                    print!("Opcode: [{:>04X}] ", opcode);
                 }
-                _ => {
-                    // 0nnn - SYS addr, no longer used
-                    print!("Opcode: [{:>04X}] ", opcode);
-                }
+                _ => (),
             },
             0x1000 => {
                 // 1nnn - JP addr
-                let nnn = opcode & 0x0FFF;
-                self.pc = nnn;
+                self.pc = get_nnn(opcode);
             }
             0x2000 => {
                 // 2nnn - CALL addr
                 self.sp += 1;
                 self.stack[self.sp as usize] = self.pc;
-                self.pc = opcode & 0x0FFF;
+                self.pc = get_nnn(opcode);
             }
             0x3000 => {
                 // 3xkk - SE Vx, byte
-                if self.v[(opcode & 0x0F00) as usize] as u16 == opcode & 0x00FF {
-                    self.pc += 2;
+                if u16::from(self.v[get_x(opcode)]) == get_kk(opcode) {
+                    self.increment_pc();
                 }
             }
             0x4000 => {
                 // 4xkk - SNE Vx, byte
-                if self.v[(opcode & 0x0F00) as usize] as u16 != opcode & 0x00FF {
-                    self.pc += 2;
+                if u16::from(self.v[get_x(opcode)]) != get_kk(opcode) {
+                    self.increment_pc();
                 }
             }
             0x5000 => {
                 // 5xy0 - SE Vx, Vy
-                if self.v[(opcode & 0x0F00) as usize] == self.v[(opcode & 0x00F0) as usize] {
-                    self.pc += 2;
+                if u16::from(self.v[get_x(opcode)]) == u16::from(self.v[get_y(opcode)]) {
+                    self.increment_pc();
                 }
             }
             0x6000 => {
                 // 6xkk - LD Vx, byte
-                print!("Opcode: [{:>04X}] ", opcode);
+                self.v[get_x(opcode)] = get_kk(opcode) as u8;
             }
             0x7000 => {
                 // 7xkk - ADD Vx, byte
-                print!("Opcode: [{:>04X}] ", opcode);
+                self.v[get_x(opcode)] += get_kk(opcode) as u8;
             }
             0x8000 => match opcode & 0x000F {
                 // bitwise operations
-                0x0000 => { // 8xy0 - LD Vx, Vy
-                    self.v[(opcode & 0x0F00) as usize] = self.v[(opcode & 0x00F0) as usize];
+                0x0000 => {
+                    // 8xy0 - LD Vx, Vy
+                    self.v[get_x(opcode)] = self.v[get_y(opcode)];
                 }
                 0x0001 => {
                     // OR Vx, Vy
@@ -220,18 +216,76 @@ impl Cpu {
                 //Err(Error::InvalidOpCode())
             }
         }
-        self.pc += 2;
+        self.increment_pc();
         Ok(())
+    }
+
+    #[inline(always)]
+    fn increment_pc(&mut self) {
+        self.pc += 2;
     }
 }
 
+#[inline(always)]
+fn compare(b1: u16, b2: u16) -> bool {
+    b1 == b2
+}
+
+#[inline(always)]
+fn get_x(opcode: u16) -> usize {
+    usize::from(opcode & 0x0F00)
+}
+
+#[inline(always)]
+fn get_y(opcode: u16) -> usize {
+    usize::from(opcode & 0x00F0)
+}
+
+#[inline(always)]
+fn get_kk(opcode: u16) -> u16 {
+    opcode & 0x00FF
+}
+
+#[inline(always)]
+fn get_nnn(opcode: u16) -> u16 {
+    opcode & 0x0FFF
+}
+
 pub struct Display {
-    pub vram: [bool; SCREEN_HEIGHT * SCREEN_WIDTH],
+    pub vram: [u8; SCREEN_HEIGHT * SCREEN_WIDTH * 4],
 }
 
 impl Display {
     pub fn clear(&mut self) {
-        self.vram = [false; SCREEN_HEIGHT * SCREEN_WIDTH];
+        self.vram = [0x00; SCREEN_HEIGHT * SCREEN_WIDTH * 4];
+    }
+    // fixme: support alpha channel
+    pub unsafe fn set_pixel_greyscale(&mut self, pos: usize, val: u8) {
+        // set to unsafe as it does not do any bounds checking
+        self.vram
+            .iter_mut()
+            .skip(pos * 4)
+            .take(3)
+            .for_each(|pixel| *pixel = val);
+        self.vram
+            .iter_mut()
+            .skip(pos * 4 + 3)
+            .take(1)
+            .for_each(|pixel| *pixel = 0xFF);
+    }
+    pub fn set_pixel(&mut self, x: usize, y: usize) -> Result<(), Error> {
+        if x < 64 && y < 64 {
+            unsafe { self.set_pixel_greyscale(x + (SCREEN_WIDTH * y), 0xFF) };
+        } else if x >= 64 {
+            return Err(Error::InvalidValue(
+                "Value x is too large (was > 63)".to_string(),
+            ));
+        } else if y > 62 {
+            return Err(Error::InvalidValue(
+                "Value y is too large (was > 31)".to_string(),
+            ));
+        }
+        Ok(())
     }
 }
 pub struct Keypad {}
