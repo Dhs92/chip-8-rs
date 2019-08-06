@@ -5,6 +5,7 @@ use std::io::prelude::*;
 const SCREEN_WIDTH: usize = 64;
 const SCREEN_HEIGHT: usize = 32;
 
+#[derive(Debug)]
 pub enum Error {
     InvalidOpCode(),
     InvalidValue(String),
@@ -15,6 +16,7 @@ impl fmt::Display for Error {
         write!(f, "{}", self)
     }
 }
+
 
 pub struct Cpu {
     // index register
@@ -213,7 +215,7 @@ impl Cpu {
             _ => {
                 print!("Invalid Opcode: [{:04X}] ", opcode);
 
-                //Err(Error::InvalidOpCode())
+                return Err(Error::InvalidOpCode())
             }
         }
         self.increment_pc();
@@ -274,15 +276,19 @@ impl Display {
             .for_each(|pixel| *pixel = 0xFF);
     }
     pub fn set_pixel(&mut self, x: usize, y: usize) -> Result<(), Error> {
-        if x < 64 && y < 64 {
+        if x < 64 && y < 32 {
             unsafe { self.set_pixel_greyscale(x + (SCREEN_WIDTH * y), 0xFF) };
         } else if x >= 64 {
             return Err(Error::InvalidValue(
-                "Value x is too large (was > 63)".to_string(),
+                format!("Value x is too large ({} is > 63)", x),
             ));
-        } else if y > 62 {
+        } else if y >= 32 {
             return Err(Error::InvalidValue(
-                "Value y is too large (was > 31)".to_string(),
+                format!("Value y is too large ({} is > 31)", y),
+            ));
+        } else {
+            return Err(Error::InvalidValue(
+                "An unknown error has occurred!".to_string(),
             ));
         }
         Ok(())
