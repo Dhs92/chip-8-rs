@@ -4,3 +4,4 @@
 *.c8
 *.bmp
 *.lock
+.vscode/launch.json

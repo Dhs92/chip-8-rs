@@ -1,13 +1,15 @@
+use crate::drivers::Display;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
-const SCREEN_WIDTH: usize = 64;
-const SCREEN_HEIGHT: usize = 32;
+use rand::prelude::*;
+pub(crate) const SCREEN_WIDTH: usize = 64;
+pub(crate) const SCREEN_HEIGHT: usize = 32;
 
 #[derive(Debug)]
 pub enum Error {
-    InvalidOpCode(),
+    InvalidOpCode(u16),
     InvalidValue(String),
 }
 
@@ -17,6 +19,7 @@ impl fmt::Display for Error {
     }
 }
 
+pub struct Keypad {}
 
 pub struct Cpu {
     // index register
@@ -39,29 +42,43 @@ pub struct Cpu {
 }
 
 impl Cpu {
-    pub fn load_file(&mut self, filename: &str) -> io::Result<usize> {
+    pub fn load_file(&mut self, filename: &std::path::Path) -> io::Result<usize> {
         let mut file = fs::File::open(filename)?;
         let mut buffer: [u8; 3584] = [0; 3584];
         let bytes_read = file.read(&mut buffer)?;
 
-        //self.memory[self.pc as usize..].copy_from_slice(&buffer[self.pc as usize..bytes_read]);
-        for (i, byte) in buffer.iter().enumerate().take(bytes_read).skip(self.pc as usize) {
-             self.memory[i] = *byte;
+        for (&byte, mem) in buffer
+            .iter()
+            .zip(self.memory.iter_mut().skip(self.pc as usize))
+            .take(bytes_read)
+        {
+            *mem = byte;
         }
-        
+        log::debug!("{:>04X?}", self.memory.to_vec());
         Ok(bytes_read)
     }
 
     fn get_opcode(&mut self) -> u16 {
-        let b1: u16 = u16::from(self.memory[self.pc as usize]);
-        let b2: u16 = u16::from(self.memory[self.pc as usize + 1]);
-
-        b1 << 8 | b2
+        if self.pc < 4095 {
+            let b1: u16 = u16::from(self.memory[self.pc as usize]);
+            let b2: u16 = u16::from(self.memory[self.pc as usize + 1]);
+            let opcode = b1 << 8 | b2;
+            log::debug!("0x{:>04X}", opcode);
+            opcode
+        } else {
+            log::debug!("No opcodes remaining");
+            0
+        }
     }
 
     // TODO implement OPCODEs
-    fn execute_opcode(&mut self) -> Result<(), Error> {
+    pub fn execute_opcode(&mut self) -> Result<(), Error> {
         let opcode = self.get_opcode();
+        let x = get_x(opcode);
+        let y = get_x(opcode);
+        let n = get_n(opcode);
+        let kk = get_kk(opcode);
+        let nnn = get_nnn(opcode);
 
         match opcode & 0xF000 {
             // match against nibbles &'d with 0xF
@@ -79,143 +96,210 @@ impl Cpu {
             },
             0x1000 => {
                 // 1nnn - JP addr
-                self.pc = get_nnn(opcode);
+                self.pc = nnn;
             }
             0x2000 => {
                 // 2nnn - CALL addr
                 self.sp += 1;
                 self.stack[self.sp as usize] = self.pc;
-                self.pc = get_nnn(opcode);
+                self.pc = nnn;
             }
             0x3000 => {
                 // 3xkk - SE Vx, byte
-                if u16::from(self.v[get_x(opcode)]) == get_kk(opcode) {
+                if u16::from(self.v[x]) == kk {
                     self.increment_pc();
                 }
             }
             0x4000 => {
                 // 4xkk - SNE Vx, byte
-                if u16::from(self.v[get_x(opcode)]) != get_kk(opcode) {
+                if u16::from(self.v[x]) != kk {
                     self.increment_pc();
                 }
             }
             0x5000 => {
                 // 5xy0 - SE Vx, Vy
-                if u16::from(self.v[get_x(opcode)]) == u16::from(self.v[get_y(opcode)]) {
+                if u16::from(self.v[x]) == u16::from(self.v[y]) {
                     self.increment_pc();
                 }
             }
             0x6000 => {
                 // 6xkk - LD Vx, byte
-                self.v[get_x(opcode)] = get_kk(opcode) as u8;
+                self.v[x] = kk as u8;
             }
             0x7000 => {
                 // 7xkk - ADD Vx, byte
-                self.v[get_x(opcode)] += get_kk(opcode) as u8;
+                let v_tmp = self.v[x].overflowing_add(kk as u8);
+
+                self.v[x] = v_tmp.0;
             }
             0x8000 => match opcode & 0x000F {
                 // bitwise operations
                 0x0000 => {
                     // 8xy0 - LD Vx, Vy
-                    self.v[get_x(opcode)] = self.v[get_y(opcode)];
+                    self.v[x] = self.v[y];
                 }
                 0x0001 => {
                     // OR Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    self.v[x] |= self.v[y];
                 }
                 0x0002 => {
                     // AND Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    self.v[x] &= self.v[y];
                 }
                 0x0003 => {
                     // XOR Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    self.v[x] ^= self.v[y];
                 }
                 0x0004 => {
                     // ADD Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    let (add, overflow) = self.v[x].overflowing_add(self.v[y]);
+                    if overflow {
+                        self.v[15] = 1
+                    } else {
+                        self.v[15] = 0;
+                    }
+                    self.v[x] = add;
                 }
                 0x0005 => {
                     // SUB Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    if self.v[x] > self.v[y] {
+                        self.v[15] = 1;
+                    } else {
+                        self.v[15] = 0;
+                    }
+
+                    self.v[x] = self.v[y] - self.v[x];
                 }
                 0x0006 => {
                     // SHR Vx {, Vy}
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    if self.v[x] & 0b0000_0001 == 0b0000_0001 {
+                        self.v[15] = 1;
+                    } else {
+                        self.v[15] = 0;
+                    }
+
+                    self.v[x] >>= 1;
                 }
                 0x0007 => {
                     // SUBN Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    if self.v[y] > self.v[x] {
+                        self.v[15] = 1;
+                    } else {
+                        self.v[15] = 0;
+                    }
+
+                    self.v[x] -= self.v[y];
                 }
                 0x000E => {
-                    // SHL Vx, Vy
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    // SHL Vx {, Vy}
+                    if self.v[x] & 0b1000_0000 == 0b1000_0000 {
+                        self.v[15] = 1;
+                    } else {
+                        self.v[15] = 0;
+                    }
+
+                    self.v[x] <<= 1;
                 }
                 _ => (),
             },
             0x9000 => {
                 // 9xy0 - SNE Vx, Vy
-                print!("Opcode: [{:>04X}] ", opcode);
+                if self.v[x] != self.v[y] {
+                    self.increment_pc();
+                    self.increment_pc();
+                }
             }
             0xA000 => {
                 // Annn - LD I, addr
-                print!("Opcode: [{:>04X}] ", opcode);
+                self.i = nnn;
             }
             0xB000 => {
                 // Bnnn - JP V0, addr
-                print!("Opcode: [{:>04X}] ", opcode);
+                self.pc = u16::from(self.v[0]) + nnn;
             }
             0xC000 => {
                 // Cxkk - RND Vx, byte
-                print!("Opcode: [{:>04X}] ", opcode);
+                self.v[x] = rand::random::<u8>() & kk as u8;
             }
             0xD000 => {
+                // TODO: rewrite so that it actually works && follows the spec
                 // Dxyn - DRW Vx, Vy, nibble
-                print!("Opcode: [{:>04X}] ", opcode);
+                //let mut y_local = y;
+                //let mut x_local;
+
+                for (byte, bools) in self
+                    .memory
+                    .iter()
+                    .skip(self.i as usize)
+                    .take(n as usize)
+                    .map(|byte| byte.as_bools())
+                    .enumerate()
+                {
+                    for (bit, b) in bools.iter().enumerate() {
+                        if *b {
+                            if self.display.set_pixel(x + bit, y + byte).unwrap() {
+                                self.v[15] = 1;
+                            } else {
+                                self.v[15] = 0;
+                            }
+                        }
+                    }
+                }
             }
             0xE000 => match opcode & 0x00FF {
                 0x009E => {
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    // Ex9E - SKP Vx
+                    print!("Opcode: [{:>04X}] ", opcode);                    
                 }
                 0x00A1 => {
+                    // ExA1 - SKNP Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 _ => (),
             },
             0xF000 => match opcode & 0x00FF {
                 0x0007 => {
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    // Fx07 - LD Vx, DT
+                    self.v[x] = self.dt;
                 }
                 0x000A => {
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    // Fx0A - LD Vx, K
+                    
                 }
                 0x0015 => {
+                    // Fx15 - LD DT, Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x0018 => {
+                    // Fx18 - LD ST, Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x001E => {
-                    print!("Opcode: [{:>04X}] ", opcode);
+                    // Fx1E - ADD I, Vx
+                    self.i += x as u16;
                 }
                 0x0029 => {
+                    // Fx29 - LD F, Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x0033 => {
+                    // Fx33 - LD B, Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x0055 => {
+                    // Fx55 - LD [I], Vx
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x0065 => {
+                    // Fx65 - LD Vx, [I]
                     print!("Opcode: [{:>04X}] ", opcode);
                 }
                 _ => (),
             },
             _ => {
-                print!("Invalid Opcode: [{:04X}] ", opcode);
+                println!("Invalid Opcode: [{:04X}] ", opcode);
 
-                return Err(Error::InvalidOpCode())
+                return Err(Error::InvalidOpCode(opcode));
             }
         }
         self.increment_pc();
@@ -235,12 +319,12 @@ fn compare(b1: u16, b2: u16) -> bool {
 
 #[inline(always)]
 fn get_x(opcode: u16) -> usize {
-    usize::from(opcode & 0x0F00)
+    usize::from((opcode & 0x0F00) >> 8)
 }
 
 #[inline(always)]
 fn get_y(opcode: u16) -> usize {
-    usize::from(opcode & 0x00F0)
+    usize::from((opcode & 0x00F0) >> 4)
 }
 
 #[inline(always)]
@@ -253,45 +337,40 @@ fn get_nnn(opcode: u16) -> u16 {
     opcode & 0x0FFF
 }
 
-pub struct Display {
-    pub vram: [u8; SCREEN_HEIGHT * SCREEN_WIDTH * 4],
+#[inline(always)]
+fn get_n(opcode: u16) -> u16 {
+    opcode & 0x000F
 }
 
-impl Display {
-    pub fn clear(&mut self) {
-        self.vram = [0x00; SCREEN_HEIGHT * SCREEN_WIDTH * 4];
+// Thanks @Nick12
+pub trait AsBoolSlice {
+    fn is_set(self, mask: u8) -> bool;
+    fn is_set_n(self, n: u8) -> bool;
+    fn as_bools(self) -> [bool; 8];
+}
+
+impl AsBoolSlice for u8 {
+    #[inline]
+    fn is_set(self, mask: u8) -> bool {
+        (self & mask) == mask
     }
-    // fixme: support alpha channel
-    pub unsafe fn set_pixel_greyscale(&mut self, pos: usize, val: u8) {
-        // set to unsafe as it does not do any bounds checking
-        self.vram
-            .iter_mut()
-            .skip(pos * 4)
-            .take(3)
-            .for_each(|pixel| *pixel = val);
-        self.vram
-            .iter_mut()
-            .skip(pos * 4 + 3)
-            .take(1)
-            .for_each(|pixel| *pixel = 0xFF);
+
+    #[inline]
+    fn is_set_n(self, bit_number: u8) -> bool {
+        self.is_set(1u8 << bit_number)
     }
-    pub fn set_pixel(&mut self, x: usize, y: usize) -> Result<(), Error> {
-        if x < 64 && y < 32 {
-            unsafe { self.set_pixel_greyscale(x + (SCREEN_WIDTH * y), 0xFF) };
-        } else if x >= 64 {
-            return Err(Error::InvalidValue(
-                format!("Value x is too large ({} is > 63)", x),
-            ));
-        } else if y >= 32 {
-            return Err(Error::InvalidValue(
-                format!("Value y is too large ({} is > 31)", y),
-            ));
-        } else {
-            return Err(Error::InvalidValue(
-                "An unknown error has occurred!".to_string(),
-            ));
-        }
-        Ok(())
+
+    #[inline]
+    fn as_bools(self) -> [bool; 8] {
+        [
+            self.is_set_n(7),
+            self.is_set_n(6),
+            self.is_set_n(5),
+            self.is_set_n(4),
+            self.is_set_n(3),
+            self.is_set_n(2),
+            self.is_set_n(1),
+            self.is_set_n(0),
+        ]
     }
 }
-pub struct Keypad {}
