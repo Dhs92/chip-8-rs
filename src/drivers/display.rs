@@ -1,6 +1,6 @@
 use crate::cpu::SCREEN_HEIGHT;
 use crate::cpu::SCREEN_WIDTH;
-use crate::Error;
+use crate::cpu::Error;
 
 pub struct Display {
     pub vram: [u8; SCREEN_HEIGHT * SCREEN_WIDTH * 4],
@@ -25,6 +25,7 @@ impl Display {
                     toggled = true
                 }
             });
+
         self.vram
             .iter_mut()
             .skip(pos * 4 + 3)
@@ -33,6 +34,7 @@ impl Display {
 
         toggled
     }
+    // returns bool if pixel is changed, Error if writing fails
     pub fn set_pixel(&mut self, x: usize, y: usize) -> Result<bool, Error> {
         let toggled;
 

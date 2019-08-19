@@ -1,9 +1,9 @@
 use crate::drivers::Display;
+use rand::prelude::*;
 use std::fmt;
 use std::fs;
 use std::io;
 use std::io::prelude::*;
-use rand::prelude::*;
 pub(crate) const SCREEN_WIDTH: usize = 64;
 pub(crate) const SCREEN_HEIGHT: usize = 32;
 
@@ -75,7 +75,7 @@ impl Cpu {
     pub fn execute_opcode(&mut self) -> Result<(), Error> {
         let opcode = self.get_opcode();
         let x = get_x(opcode);
-        let y = get_x(opcode);
+        let y = get_y(opcode);
         let n = get_n(opcode);
         let kk = get_kk(opcode);
         let nnn = get_nnn(opcode);
@@ -168,7 +168,7 @@ impl Cpu {
                         self.v[15] = 0;
                     }
 
-                    self.v[x] = self.v[y] - self.v[x];
+                    self.v[x] = self.v[y].overflowing_sub(self.v[x]).0;
                 }
                 0x0006 => {
                     // SHR Vx {, Vy}
@@ -188,7 +188,7 @@ impl Cpu {
                         self.v[15] = 0;
                     }
 
-                    self.v[x] -= self.v[y];
+                    self.v[x] = self.v[x].overflowing_sub(self.v[y]).0;
                 }
                 0x000E => {
                     // SHL Vx {, Vy}
@@ -249,7 +249,7 @@ impl Cpu {
             0xE000 => match opcode & 0x00FF {
                 0x009E => {
                     // Ex9E - SKP Vx
-                    print!("Opcode: [{:>04X}] ", opcode);                    
+                    print!("Opcode: [{:>04X}] ", opcode);
                 }
                 0x00A1 => {
                     // ExA1 - SKNP Vx
@@ -264,7 +264,7 @@ impl Cpu {
                 }
                 0x000A => {
                     // Fx0A - LD Vx, K
-                    
+
                 }
                 0x0015 => {
                     // Fx15 - LD DT, Vx

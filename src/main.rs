@@ -1,105 +1,60 @@
 #![allow(dead_code)]
 mod cpu;
 mod drivers;
-use crate::cpu::*;
-use crate::drivers::Display;
-use ggez;
+
+use std::time::Duration;
+use std::thread::sleep;
+use glium::{
+    glutin::{dpi, ContextBuilder, Event, EventsLoop, WindowBuilder, WindowEvent},
+    Display, Surface, backend,
+};
+
 /*
 For display: store the sprite in an array of u8. 1b == 1px, write position + offset
 */
 // TODO restructure files
+// TODO read create_window args from JSON file with serde
 
-#[allow(non_snake_case)]
-struct MainState {
-    CPU: Cpu,
-    cpu_state: bool,
-}
+fn main() -> Result<(), Box<dyn std::error::Error>> {
 
-impl MainState {
-    fn new() -> ggez::GameResult<MainState> {
-        let m = Self {
-            CPU: Cpu {
-                pc: 0x200,
-                i: 0,
-                memory: [0; 4096],
-                v: [0; 16],
-                keypad: Keypad {},
-                display: Display {
-                    vram: [0x00; SCREEN_HEIGHT * SCREEN_WIDTH * 4],
-                },
-                stack: [0; 16],
-                sp: 0,
-                dt: 0,
-            },
-            cpu_state: false,
-        };
+    let mut events_loop = EventsLoop::new();
+    let display = create_window(640.0, 320.0, &events_loop, "chip-8")?;
 
-        Ok(m)
-    }
-}
+    let mut closed = false;
+    while !closed {
+        let begin = std::time::Instant::now();
+        let mut target = display.draw();
 
-impl ggez::event::EventHandler for MainState {
-    fn update(&mut self, _ctx: &mut ggez::Context) -> ggez::GameResult {
-        if !self.cpu_state {
-            let args: Vec<String> = std::env::args().collect();
+        target.clear_color(0.0, 0.0, 0.0, 0.0);
 
-            let _bytes_read = self
-                .CPU
-                .load_file(std::path::Path::new(&args[1]))
-                .unwrap_or_else(|_| panic!("File not found: {}", args[1]));
+        target.finish()?;
 
-            log::debug!("Bytes Read: {}", _bytes_read);
+        events_loop.poll_events(|ev| if let Event::WindowEvent {event: WindowEvent::CloseRequested, .. }  = ev {
+            closed = true;
+        });
 
-            self.cpu_state = true;
+        let end = std::time::Instant::now();
+
+        let delta = end - begin;
+
+        if delta <= Duration::from_millis(1/60) {
+            sleep(Duration::from_millis(1/60).checked_sub(delta).unwrap());
         }
 
-        self.CPU.execute_opcode().unwrap();
-
-        Ok(())
     }
 
-    fn draw(&mut self, ctx: &mut ggez::Context) -> ggez::GameResult {
-        let mut image = ggez::graphics::Image::from_rgba8(ctx, 64, 32, &self.CPU.display.vram)?;
-
-        image.set_filter(ggez::graphics::FilterMode::Nearest);
-
-        ggez::graphics::draw(
-            ctx,
-            &image,
-            ggez::graphics::DrawParam::new().scale(ggez::mint::Vector2 {
-                x: 10.0f32,
-                y: 10.0f32,
-            }),
-        )?;
-
-        ggez::graphics::present(ctx)?;
-
-        Ok(())
-    }
+    Ok(())
 }
 
-fn main() -> ggez::GameResult {
-    let wm = ggez::conf::WindowMode {
-        width: 640.0,
-        height: 320.0,
-        maximized: false,
-        fullscreen_type: ggez::conf::FullscreenType::Windowed,
-        borderless: false,
-        min_width: 0.0,
-        max_width: 0.0,
-        min_height: 0.0,
-        max_height: 0.0,
-        resizable: true,
-    };
+fn create_window(x_dim: f64, y_dim: f64, events_loop: &EventsLoop, title: &str) -> Result<Display, backend::glutin::DisplayCreationError> {
+    let wb = WindowBuilder::new()
+        .with_dimensions(dpi::LogicalSize::new(x_dim, y_dim))
+        .with_title(title);
 
-    let logger_handle = flexi_logger::Logger::with_str("off, cpu=debug")
-        .start()
-        .unwrap_or_else(|e| panic!("Logger initialization failed with: {}", e));
-    logger_handle.validate_logs(&[("OFF", "cpu", "debug")]);
+    let cb = ContextBuilder::new();
 
-    let cb = ggez::ContextBuilder::new("chip-8", "Yuuki").window_mode(wm);
-
-    let (ctx, event_loop) = &mut cb.build()?;
-    let state = &mut MainState::new()?;
-    ggez::event::run(ctx, event_loop, state)
+    match Display::new(wb, cb, &events_loop) {
+        Ok(display) => { Ok(display) }
+        Err(e) => { Err(e) }
+    }
 }
