@@ -1,4 +1,4 @@
-use crate::drivers::Display;
+use crate::drivers::display::Display;
 use rand::prelude::*;
 use std::fmt;
 use std::fs;
